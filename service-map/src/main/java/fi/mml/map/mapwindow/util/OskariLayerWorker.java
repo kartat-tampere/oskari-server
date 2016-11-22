@@ -62,6 +62,18 @@ public class OskariLayerWorker {
      * @param layerIdList List of selected layer IDs
      * @param user        User
      * @param lang        Language
+     * @return JSONObject containing the selected layers
+     */
+    public static JSONObject getListOfMapLayersById(final List<String> layerIdList, final User user,
+                                                    final String lang) {
+        return getListOfMapLayersById(layerIdList, user, lang, null, false, false);
+    }
+    /**
+     * Gets all the selected map layers
+     *
+     * @param layerIdList List of selected layer IDs
+     * @param user        User
+     * @param lang        Language
      * @param isPublished Determines the permission type used for the layers (view/published view)
      * @param isSecure    true to modify urls for easier proxy forwarding/false to keep as is
      * @return JSONObject containing the selected layers
@@ -216,13 +228,18 @@ public class OskariLayerWorker {
     public static void transformWKTGeom(final JSONObject layerJSON, final String mapSRS) {
 
         final String wktWGS84 = layerJSON.optString("geom");
-        if(wktWGS84 == null) {
+        if(wktWGS84 == null || wktWGS84.isEmpty() || mapSRS == null || mapSRS.isEmpty()) {
+            layerJSON.remove("geom");
             return;
         }
-        // WTK is saved as EPSG:4326 in database
-        final String transformed = WKTHelper.transform(wktWGS84, WKTHelper.PROJ_EPSG_4326, mapSRS);
-        // value will be removed if transform failed, that's ok since client can't handle it if it's in unknown projection
-        JSONHelper.putValue(layerJSON, "geom", transformed);
+        try {
+            // WTK is saved as EPSG:4326 in database
+            final String transformed = WKTHelper.transformLayerCoverage(wktWGS84, mapSRS);
+            // value will be removed if transform failed, that's ok since client can't handle it if it's in unknown projection
+            JSONHelper.putValue(layerJSON, "geom", transformed);
+        } catch (Exception ex) {
+            log.debug("Error transforming coverage to", mapSRS, "from", wktWGS84);
+        }
     }
     
     /**

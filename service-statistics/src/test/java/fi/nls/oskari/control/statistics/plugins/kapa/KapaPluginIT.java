@@ -49,7 +49,7 @@ import static org.mockito.Mockito.*;
 @PowerMockIgnore( {"javax.management.*"}) 
 public class KapaPluginIT {
 
-    final private StatisticalDatasourcePluginManager manager = new StatisticalDatasourcePluginManager();
+    final private StatisticalDatasourcePluginManager manager = StatisticalDatasourcePluginManager.getInstance();
     private static String testIndicatorsResponse = ResourceHelper.readStringResource("KapaIndicators.json",
             KapaPluginIT.class);
     private static String testIndicatorDataResponse = ResourceHelper.readStringResource("KapaIndicatorData.json",
@@ -149,7 +149,7 @@ public class KapaPluginIT {
         List<StatisticalIndicatorSelector> allSelectors = selectors.getSelectors();
         for (StatisticalIndicatorSelector selector : allSelectors) {
             // Selecting the first allowed value for each selector to define a proper selector.
-            selector.setValue(selector.getAllowedValues().iterator().next());
+            selector.setValue(selector.getAllowedValues().iterator().next().getKey());
         }
         Map<String, IndicatorValue> indicatorValues = indicators.get(0).getLayers().get(0).getIndicatorValues(selectors);
         assertNotNull("Indicator values response was null.", indicatorValues);

@@ -17,3 +17,9 @@ transport.log
 /standalone-jetty/dist/public/Oskari
 /standalone-jetty/dist/*.jar
 /bin/
+/service-spatineo-monitor/nbproject/
+/control-base/nbproject
+*/nbactions.xml
+*/nb-configuration.xml
+
+/service-search-nls/nbproject/

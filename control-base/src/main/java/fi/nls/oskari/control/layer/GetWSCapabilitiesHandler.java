@@ -55,7 +55,7 @@ public class GetWSCapabilitiesHandler extends ActionHandler {
         try {
             if(OskariLayer.TYPE_WMS.equals(layerType)) {
                 // New method for parsing WMSCetGapabilites to Oskari layers structure
-                final JSONObject capabilities = GetGtWMSCapabilities.getWMSCapabilities(url, user, pw, version);
+                final JSONObject capabilities = GetGtWMSCapabilities.getWMSCapabilities(url, user, pw, version, currentCrs);
                 ResponseHelper.writeResponse(params, capabilities);
             }
             else {
@@ -63,14 +63,20 @@ public class GetWSCapabilitiesHandler extends ActionHandler {
                     WMTSCapabilitiesParser parser = new WMTSCapabilitiesParser();
 
                     // setup capabilities URL
-                    final OskariLayerCapabilities caps  = capabilitiesService.getCapabilities(url, OskariLayer.TYPE_WMTS, user, pw, version);
-                    JSONObject resultJSON = parser.parseCapabilitiesToJSON(caps.getData(), url, currentCrs);
+                    OskariLayerCapabilities caps  = capabilitiesService.getCapabilities(url, OskariLayer.TYPE_WMTS, user, pw, version);
+                    String capabilitiesXML = caps.getData();
+                    if(capabilitiesXML == null || capabilitiesXML.trim().isEmpty()) {
+                        // retry from service - might get empty xml from db
+                        caps = capabilitiesService.getCapabilities(url, OskariLayer.TYPE_WMTS, user, pw, version, true);
+                        capabilitiesXML = caps.getData();
+                    }
+                    JSONObject resultJSON = parser.parseCapabilitiesToJSON(capabilitiesXML, url, currentCrs);
                     JSONHelper.putValue(resultJSON, "xml", caps.getData());
                     ResponseHelper.writeResponse(params, resultJSON);
                 }
                 else if(OskariLayer.TYPE_WFS.equals(layerType)) {
                     // New method for parsing WFSCetGapabilites to Oskari layers structure
-                    final JSONObject capabilities = GetGtWFSCapabilities.getWFSCapabilities(url, version, user, pw);
+                    final JSONObject capabilities = GetGtWFSCapabilities.getWFSCapabilities(url, version, user, pw, currentCrs);
                     ResponseHelper.writeResponse(params, capabilities);
                 }
                 else {

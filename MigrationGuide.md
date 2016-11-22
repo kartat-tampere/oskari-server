@@ -1,5 +1,113 @@
 # Migration guide
 
+## 1.40.0
+
+The sample application can be updated to include the new statistics UI. If you are using the sample-application flyway
+module (have "sample" included in oskari-ext.properties "db.additional.modules" property) and would like to have 
+this bundle included, you can add a property: 
+
+    flyway.sample.1_0_8.skip=false 
+
+This functionality is opt-in with the configuration since it needs additional manual configuration for datasources and 
+maplayers to use as regionsets. The frontend minifierAppSetup.jsons for sample/servlet app include references to the
+ frontend code so to optimize the filesize clients need to download you might want to remove them if not using the 
+ statistics functionality. 
+
+The sample application will also add more zoom-levels for the configuration. All views except published maps with
+ EPSG:4326 will be have the resolutions (zoom-levels) set to: 
+ 
+    [0.3515625,0.17578125,0.087890625,0.0439453125,0.02197265625,0.010986328125,0.0054931640625,0.00274658203125,0.001373291015625,0.0006866455078125,0.00034332275390625,0.000171661376953125,0.0000858306884765625,0.00004291534423828125,0.000021457672119140625,0.000010728836059570312,0.000005364418029785156,0.000002682209014892578]
+
+You can opt-out of the resolutions change by adding a property in oskari-ext.properties:
+
+    flyway.sample.1_0_9.skip=true
+
+## 1.39.0
+
+This update includes a forced migration of publish template to Openlayers 3 based map. The possible Openlayers 2 based 
+publish template will be copied to a new ID and the log will show a message like "Previous publish template was
+ saved as a backup with view id: 1234." The update is skipped if Openlayers 3 based template is already defined
+  for publishing, but you can also skip the update entirely by adding a skip property to oskari-ext.properties:
+
+    flyway.1_39_1.skip = true
+
+*Note!* All new development is happening for Openlayers 3 based published maps and some features may be broken if
+ migration is skipped. You should update the template manually if automation isn't working for you.  
+
+The bundles in the template are changed based on this template: 
+https://github.com/nls-oskari/oskari-server/blob/master/content-resources/src/main/resources/json/views/ol3-publisher-template-view.json
+
+If you would like to use different page(JSP-file), application or path for the template you can override these by
+ adding configuration to oskari-ext.properties: 
+
+    flyway.1_39_1.application = servlet_published_ol3
+    flyway.1_39_1.path = /applications/sample
+    flyway.1_39_1.page = published
+
+You can also specify a custom template to be used by providing a similar file in classpath with
+ /json/views/my-template.json and using the property:
+
+    flyway.1_39_1.file = my-template.json
+
+The update keeps any state and configuration values for the template as they are, but updates the bundles to use and the 
+startup-fragment (filepath/location of the bundle).
+
+*Note!* You will need to update the minifierAppSetup.json to reflect the new template. This can be used with the default setup:
+https://github.com/nls-oskari/oskari/blob/master/applications/sample/servlet_published_ol3/minifierAppSetup.json
+
+Another update is used to migrate all published maps using Openlayers 2 based published maps to use the new publish template.
+This will programmatically "republish" all the maps having OL2 with the current publish template. This means that if you 
+skipped 1.39.1 update for the template AND haven't done anything for updating the template manually this will use an unmigrated
+publish template. This is something to consider. You can skip the migration by adding a property to oskari-ext.properties:
+ 
+    flyway.1_39_2.skip = true
+
+*Note!* If you skip this update you might need to have a separate template for new published maps using OL3 and older 
+published maps using OL2. The migration will take a while depending how many published maps there are in the system.
+ It can also fail, usually if there is broken/invalid JSON in config or state columns for bundles. You should fix the
+ JSON manually in the database and restart Jetty to run the migration again for the rest of the published maps.
+
+*Tip!* If you are trying to make a custom template you can:
+  1) Skip this migration
+  2) Try using the custom template with the publishing functionality
+  3) When you are ready to use the template: delete the row from database table oskari_status for 1.39.2 migration
+  4) Restart Jetty to run the migration using the custom template
+
+## 1.38.0
+
+The default config for statsgrid-bundle has changed and is now part of the code. The default config in portti_bundle is 
+updated to empty config. 
+
+The storing of layer coverage geometries has changed in a way that might cause problems. 
+If layer disappear from the browser UI a ~second after it has been added to the map you should
+ wipe the oskari_maplayer_metadata table in the database:
+ 
+         DELETE FROM oskari_maplayer_metadata; 
+
+This is only relevant if you have the scheduled coverage job enabled.
+
+## 1.37.0
+
+### Forced view migrations - IMPORTANT!
+
+Map publishing functionality has been implemented with a bundle called publisher. All current work toward improving 
+the publishing feature has been done on a bundle publisher2. Since the old one is no longer maintained we are forcing an
+update to any view having the publisher bundle to start using the publisher2 bundle. This shouldn't cause any problems 
+if you are using the standard publisher bundle with no modifications. If you absolutely want to keep the current publisher bundle 
+and will deal with the changes yourself you can add a property to oskari-ext.properties to skip this update:
+
+    flyway.1_37_1.skip=true
+
+You might also have ran this kind of update on your environment previously (through sample-module migrations for example).
+In such case this migration does nothing.
+
+### servlet-map/webapp-map - Openlayers polyfill
+
+The latest Openlayers 3 doesn't work with IE9 since it lacks for example requestAnimationFrame()
+ function: https://github.com/openlayers/ol3/issues/4865. A polyfill has been added to published.jsp for browsers <= IE 9.
+
+You might want to do the same for any custom JSP for published maps if you need to support IE 9.
+
 ## 1.36.0
 
 ### Application changes to JSP-files

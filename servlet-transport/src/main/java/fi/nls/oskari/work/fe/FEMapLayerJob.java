@@ -1,5 +1,6 @@
 package fi.nls.oskari.work.fe;
 
+import com.vividsolutions.jts.geom.Geometry;
 import fi.nls.oskari.domain.map.wfs.WFSSLDStyle;
 import fi.nls.oskari.eu.elf.recipe.universal.ELF_path_parse_worker;
 import fi.nls.oskari.fe.engine.FEEngineManager;
@@ -9,11 +10,16 @@ import fi.nls.oskari.fe.input.format.gml.StaxGMLInputProcessor;
 import fi.nls.oskari.fe.iri.Resource;
 import fi.nls.oskari.fe.output.OutputProcessor;
 import fi.nls.oskari.fi.rysp.generic.WFS11_path_parse_worker;
+import fi.nls.oskari.pojo.GeoJSONFilter;
 import fi.nls.oskari.pojo.SessionStore;
+import fi.nls.oskari.service.ServiceRuntimeException;
+import fi.nls.oskari.transport.TransportJobException;
 import fi.nls.oskari.util.IOHelper;
 import fi.nls.oskari.util.JSONHelper;
+import fi.nls.oskari.wfs.WFSExceptionHelper;
 import fi.nls.oskari.wfs.WFSFilter;
 import fi.nls.oskari.wfs.WFSImage;
+import fi.nls.oskari.wfs.WFSParser;
 import fi.nls.oskari.wfs.pojo.WFSLayerStore;
 import fi.nls.oskari.work.JobType;
 import fi.nls.oskari.work.OWSMapLayerJob;
@@ -24,6 +30,7 @@ import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.UsernamePasswordCredentials;
 import org.apache.http.client.AuthCache;
 import org.apache.http.client.ClientProtocolException;
+import org.apache.http.client.HttpResponseException;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.methods.HttpUriRequest;
@@ -41,6 +48,7 @@ import org.apache.http.params.HttpParams;
 import org.apache.http.protocol.BasicHttpContext;
 import org.geotools.data.simple.SimpleFeatureCollection;
 import org.geotools.feature.FeatureCollection;
+import org.geotools.feature.FeatureIterator;
 import org.geotools.referencing.CRS;
 import org.geotools.styling.Style;
 import org.json.JSONObject;
@@ -88,7 +96,7 @@ public class FEMapLayerJob extends OWSMapLayerJob {
 
     protected WFSImage createHighlightImage() {
 
-        final Style style = getSLD(this.layer.getGMLGeometryPropertyNoNamespace());
+        final Style style = getSLD(this.layer.getGMLGeometryPropertyNoNamespace(),"highlight");
 
         return new WFSImage(this.layer, this.session.getClient(),
                 WFSImage.STYLE_DEFAULT, JobType.HIGHLIGHT.toString()) {
@@ -101,7 +109,8 @@ public class FEMapLayerJob extends OWSMapLayerJob {
     @Override
     protected WFSImage createResponseImage() {
 
-        final Style style = getSLD(this.layer.getGMLGeometryPropertyNoNamespace());
+        final Style style = getSLD(this.layer.getGMLGeometryPropertyNoNamespace(),
+                this.sessionLayer != null ? this.sessionLayer.getStyleName() : "default");
 
         return new WFSImage(this.layer, this.session.getClient(),
                 WFSImage.STYLE_DEFAULT, null) {
@@ -119,10 +128,48 @@ public class FEMapLayerJob extends OWSMapLayerJob {
     protected void featuresHandler() {
         log.debug("features handler");
 
-        for (List<Object> feature : featureValuesList) {
-            this.sendWFSFeature(feature);
+        this.geomValuesList = new ArrayList<List<Object>>();
+
+        // WFSMaplayerJob only sends if type is normal, but there is additional processing for the feature anyways
+        // For now we just want highlight to NOT send a feature.
+        if(this.type != JobType.HIGHLIGHT) {
+            for (List<Object> feature : featureValuesList) {
+                    this.sendWFSFeature(feature);
+            }
         }
 
+        boolean geometryParingFailures = false;
+
+        //send geometries as well, if requested
+        if (this.session.isGeomRequest() && this.features != null) {
+            // send feature geometry
+            FeatureIterator<SimpleFeature> featuresIter = this.features.features();
+            while (goNext(featuresIter.hasNext())) {
+                SimpleFeature feature = featuresIter.next();
+                String fid = feature.getIdentifier().getID();
+                log.debug("Processing geom property of feature:", fid);
+
+                // get feature geometry (transform if needed) and get geometry center
+                Geometry geometry = WFSParser.getFeatureGeometry(feature, this.layer.getGMLGeometryProperty(), this.transformClient);
+                log.debug("Requested geometry", fid);
+                List<Object> gvalues = new ArrayList<Object>();
+                gvalues.add(fid);
+                if (geometry != null) {
+                    gvalues.add(geometry.toText());
+                } else {
+                    log.debug("Feature geometry parsing failed", fid);
+                    gvalues.add(null);
+                    geometryParingFailures = true;
+                }
+                this.geomValuesList.add(gvalues);
+            }
+            if(geometryParingFailures){
+                Map<String, Object> output = this.createCommonWarningResponse(
+                        "Geometry parsing of some features failed (unknown geometry property or transformation error",
+                        WFSExceptionHelper.WARNING_GEOMETRY_PARSING_FAILED);
+                this.sendCommonErrorResponse(output, true);
+            }
+        }
     }
 
     protected void propertiesHandler() {
@@ -169,7 +216,8 @@ public class FEMapLayerJob extends OWSMapLayerJob {
         final FERequestTemplate backendRequestTemplate = getRequestTemplate(requestTemplatePath);
         if (backendRequestTemplate == null) {
             log.error("NO Request Template available");
-            return requestResponse;
+            throw new TransportJobException("NO Request Template available [fe]",
+                    WFSExceptionHelper.ERROR_GETFEATURE_PAYLOAD_FAILED);
         }
 
         backendRequestTemplate.setRequestFeatures(srsName, featureNs, featurePrefix,
@@ -178,17 +226,16 @@ public class FEMapLayerJob extends OWSMapLayerJob {
         FeatureEngine featureEngine = null;
         try {
             featureEngine = getFeatureEngine(recipePath);
-        } catch (InstantiationException e3) {
-            log.error(e3);
-        } catch (IllegalAccessException e3) {
-            log.error(e3);
-        } catch (ClassNotFoundException e) {
-            log.error(e);
+        } catch (Exception e) {
+            throw new TransportJobException(e.getMessage(),
+                    e.getCause(),
+                    WFSExceptionHelper.ERROR_GETFEATURE_ENGINE_FAILED);
         }
 
         if (featureEngine == null) {
-            log.error("NO FeatureEngine available");
-            return requestResponse;
+            log.error("NO FeatureEngine available - maybe invalid wfs layer configuration");
+            throw new TransportJobException("NO FeatureEngine available - maybe invalid wfs layer configuration",
+                    WFSExceptionHelper.ERROR_GETFEATURE_ENGINE_FAILED);
         }
 
         // Is parsing based on parse config
@@ -225,7 +272,7 @@ public class FEMapLayerJob extends OWSMapLayerJob {
 
             final OutputProcessor outputProcessor = new FEOutputProcessor(
                     resultsList, responseCollections, crs, requestResponse,
-                    selectedProperties, selectedPropertiesIndex, transform);
+                    selectedProperties, selectedPropertiesIndex, transform, geomProp);
 
             /* Backend HTTP URI info */
             FEUrl backendUrlInfo = getBackendURL(urlTemplate);
@@ -340,12 +387,24 @@ public class FEMapLayerJob extends OWSMapLayerJob {
 
                 log.debug("[fe] execute response " + succee + " for " + url);
 
-            } catch (ClientProtocolException e) {
+            } catch (HttpResponseException e) {
                 log.error("Error parsing response:", log.getCauseMessages(e));
                 log.debug(e);
+                throw new ServiceRuntimeException("Status code: " + Integer.toString(e.getStatusCode()) + " " + e.getMessage(),
+                        e.getCause(),
+                        WFSExceptionHelper.ERROR_GETFEATURE_POSTREQUEST_FAILED);
             } catch (IOException e) {
                 log.error("Error fetching response:", log.getCauseMessages(e));
                 log.debug(e);
+                throw new ServiceRuntimeException(e.getMessage(),
+                        e.getCause(),
+                        WFSExceptionHelper.ERROR_GETFEATURE_POSTREQUEST_FAILED);
+            } catch (Exception e) {
+                log.error("Error fetching response:", log.getCauseMessages(e));
+                log.debug(e);
+                throw new ServiceRuntimeException(e.getMessage(),
+                        e.getCause(),
+                        WFSExceptionHelper.ERROR_GETFEATURE_POSTREQUEST_FAILED);
             } finally {
                 // When HttpClient instance is no longer needed,
                 // shut down the connection manager to ensure
@@ -354,24 +413,16 @@ public class FEMapLayerJob extends OWSMapLayerJob {
                 log.debug("[fe] http shutdown for " + url);
             }
 
-        } catch (NoSuchAuthorityCodeException e) {
+        } catch (ServiceRuntimeException e) {
             log.error(e);
-        } catch (FactoryException e) {
+            throw new TransportJobException(e.getMessage(),
+                    e.getCause(),
+                    e.getMessageKey());
+        } catch (Exception e) {
             log.error(e);
-        } catch (XPathExpressionException e) {
-            log.error(e);
-        } catch (TransformException e) {
-            log.error(e);
-        } catch (IOException e) {
-            log.error(e);
-        } catch (ParserConfigurationException e) {
-            log.error(e);
-        } catch (SAXException e) {
-            log.error(e);
-        } catch (TransformerException e) {
-            log.error(e);
-        } catch (URISyntaxException e) {
-            log.error(e);
+            throw new TransportJobException(e.getMessage(),
+                    e.getCause(),
+                    WFSExceptionHelper.ERROR_FEATURE_PARSING);
         } finally {
             log.debug("[fe] end of process");
         }
@@ -478,31 +529,33 @@ public class FEMapLayerJob extends OWSMapLayerJob {
      * 
      * @return
      */
-    protected Style getSLD(String geomPropertyname) {
+    protected Style getSLD(String geomPropertyname, String styleName) {
 
         List<WFSSLDStyle> sldStyles = this.layer.getSLDStyles();
 
         WFSSLDStyle sldStyle = null;
         for (WFSSLDStyle s : sldStyles) {
-            if ("oskari-feature-engine".equals(s.getName())) {
+            if (styleName.equals(s.getName())) {
                 log.debug("[fe] SLD for  " + this.layerId + " FE style found");
                 sldStyle = s;
                 break;
             }
         }
         String sldPath = null;
+        String sldName = null;
         if (sldStyle == null) {
             log.debug("[fe] SLD for  " + this.layerId + " not found - use default");
             sldPath = this.DEFAULT_FE_SLD_STYLE_PATH+geomPropertyname.toLowerCase()+".xml";
         }
         else {
             sldPath = sldStyle.getSLDStyle();
+            sldName = sldStyle.getName();
 
         }
 
 
 
-        Style sld = FEStyledLayerDescriptorManager.getSLD(sldPath);
+        Style sld = FEStyledLayerDescriptorManager.getSLD(sldName, sldPath);
 
         return sld;
 
@@ -515,12 +568,6 @@ public class FEMapLayerJob extends OWSMapLayerJob {
                 .getResponse().get(
                         ((FERequestResponse) requestResponse).getFeatureIri());
         return responseFeatures;
-    }
-
-    @Override
-    public boolean runHighlightJob() {
-        // FE can't handle highlights
-        return true;
     }
 
     @Override
@@ -569,12 +616,9 @@ public class FEMapLayerJob extends OWSMapLayerJob {
             // request failed
             if (response == null) {
                 log.debug("Request failed for layer" + layer.getLayerId());
-                output.put(OUTPUT_ONCE, true);
-                output.put(OUTPUT_MESSAGE, "wfs_request_failed");
-                this.service.addResults(session.getClient(),
-                        ResultProcessor.CHANNEL_ERROR, output);
                 log.debug(PROCESS_ENDED + getKey());
-                return false;
+                throw new ServiceRuntimeException("Request failed for layer: " + layer.getLayerName() + "id: " + layer.getLayerId(),
+                        WFSExceptionHelper.ERROR_GETFEATURE_POSTREQUEST_FAILED);
             }
 
             // parse response
@@ -583,12 +627,9 @@ public class FEMapLayerJob extends OWSMapLayerJob {
             // parsing failed
             if (this.features == null) {
                 log.debug("Parsing failed for layer " + this.layerId);
-                output.put(OUTPUT_ONCE, true);
-                output.put(OUTPUT_MESSAGE, ResultProcessor.ERROR_FEATURE_PARSING);
-                this.service.addResults(session.getClient(),
-                        ResultProcessor.CHANNEL_ERROR, output);
                 log.debug(PROCESS_ENDED + getKey());
-                return false;
+                throw new ServiceRuntimeException("Request failed for layer: " + layer.getLayerName(),
+                        WFSExceptionHelper.ERROR_FEATURE_PARSING);
             }
 
             // 0 features found - send size
@@ -624,8 +665,16 @@ public class FEMapLayerJob extends OWSMapLayerJob {
             }
 
             log.debug("Features count" + this.features.size());
+        } catch (ServiceRuntimeException e) {
+            log.error(e);
+            throw new TransportJobException(e.getMessage(),
+                    e.getCause(),
+                    e.getMessageKey());
         } catch (Exception ee) {
             log.debug("exception: " + ee);
+            throw new TransportJobException(ee.getMessage(),
+                    ee.getCause(),
+                    WFSExceptionHelper.ERROR_FEATURE_PARSING);
         }
 
         return true;

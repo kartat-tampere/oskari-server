@@ -4,7 +4,7 @@
     <parent>
         <groupId>fi.nls.oskari</groupId>
         <artifactId>oskari-parent</artifactId>
-        <version>1.36.1</version>
+        <version>1.40.0</version>
     </parent>
 
     <groupId>fi.nls.oskari</groupId>
@@ -32,6 +32,11 @@
 
         <dependency>
             <groupId>fi.nls.oskari.service</groupId>
+            <artifactId>oskari-control-users</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>fi.nls.oskari.service</groupId>
             <artifactId>oskari-control-example</artifactId>
         </dependency>
 
@@ -54,6 +59,17 @@
             <groupId>fi.nls.oskari.service</groupId>
             <artifactId>oskari-control-statistics</artifactId>
         </dependency>
+        <!-- Statistics plugins -->
+        <dependency>
+            <groupId>fi.nls.oskari.service</groupId>
+            <artifactId>oskari-statistics-eurostat</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>fi.nls.oskari.service</groupId>
+            <artifactId>service-statistics-pxweb</artifactId>
+        </dependency>
+        <!-- /Statistics plugins -->
+
 
         <dependency>
             <groupId>fi.nls.oskari</groupId>

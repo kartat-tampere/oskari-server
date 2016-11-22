@@ -6,7 +6,7 @@
 	<parent>
 		<groupId>fi.nls.oskari</groupId>
 		<artifactId>oskari-parent</artifactId>
-        <version>1.36.1</version>
+        <version>1.40.0</version>
 	</parent>
 	<groupId>fi.nls.oskari.service</groupId>
 	<artifactId>oskari-search-nls</artifactId>
@@ -16,6 +16,15 @@
 		<dependency>
 			<groupId>fi.nls.oskari.service</groupId>
 			<artifactId>oskari-base</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>fi.nls.karttalehtijako</groupId>
+			<artifactId>java-karttalehdet</artifactId>
+			<version>1.0.0</version>
+		</dependency>
+		<dependency>
+			<groupId>fi.nls.oskari.service</groupId>
+			<artifactId>service-csw</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>fi.nls.oskari.service</groupId>
@@ -47,11 +56,6 @@
 			<groupId>fi.mml</groupId>
 			<artifactId>nameregister</artifactId>
 		</dependency>
-
-        <dependency>
-            <groupId>org.deegree</groupId>
-            <artifactId>deegree</artifactId>
-        </dependency>
 
         <dependency>
             <groupId>fi.nls.oskari</groupId>
